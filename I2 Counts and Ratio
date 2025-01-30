@@ -1,0 +1,98 @@
+WITH DIST_FAC AS (select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and coll_code in ('lw', 'dt', 'sp', 'ph', 'hs')
+                    and (dept_code not in ('spau', 'slpa', 'hygn', 'dhyg') or dept_code is null)-- speech-language and dental hyg faculty
+                  UNION ALL
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and coll_code in ('ed', 'bc')
+                    and dept_code in ('ADLD', 'EPSY', 'EADM', 'EDUC', 'LLC', 'CSP', 'EDSP')---- graduate only education departments
+
+                  UNION ALL
+
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and fatt_code in ('SIFF', 'EXPT') -- SIF Faculty and External Partnership Faculty (off-campus edu)
+--- and id not in (select id from #stand_alone_fac)--to avoid duplicates
+
+                  UNION ALL
+
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and dept_code in ('CEUS', 'OLLI')--CPCE, not stand alone grad programs. These departments need to be remove. They are continuing education.
+)
+
+
+, StandAlone_Fac AS (
+select distinct PIDM_KEY, ID, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+From DIST_FAC)
+
+, FAC_LIST AS (
+select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+from central.dbo.fac
+where report = 1
+and year = '2023'
+and season = 'fall'
+and primary_activity in ('i')
+and fctg_code in ('FTFAC','PTFAC')
+and id not in (select id from StandAlone_Fac))
+
+, AGRCNT AS
+    (select
+    cast(count (id) as decimal) as HC,
+    cast(count (case when fctg_code like 'FT%' then id END) as decimal) AS FT_HC,
+     cast(count (case when fctg_code like 'PT%' then id END) as decimal) AS PT_HC
+    from FAC_LIST WITH (NOLOCK))
+
+, FACCNT AS (select format(FT_HC + (PT_HC/3), '0') AS FacCnt
+    from AGRCNT WITH (NOLOCK))
+
+, StuCount AS (
+select count(pidm_key)headcount, ft_pt, 'Fall '+left(term_code_Key,4)term, DISCIPLINE, majr_desc1,
+       sum (case when ft_pt = 'FT' then 1
+            when ft_pt = 'Pt' Then .33 END) As ADJ_HDCT
+from enr WITH (NOLOCK)
+where report = 1
+and season = 'fall' and year = '2023'
+and levl_code NOT IN ('PR')
+and (camp_code <> '2' or (camp_code = '2' and levl_code = 'UG')) --capture UG students on sf campus
+and (camp_code <> '3' or (camp_code = '3' and levl_code = 'UG')) --capture UG students on sac campus
+and ((coll_code not in ('sp','ph','hs')) or (coll_code in ('sp','ph','hs') and levl_code = 'UG') or (coll_code in ('sp','ph','hs') and sorcmjr_dept_code='SLPA'))--Count Speech-Language Pathology, Pre-Pharm
+and (sorcmjr_dept_code NOT IN ('ADLD', 'EPSY', 'EADM', 'EDUC','LLC','CSP','EDSP') --Remove Ed Admin and School Psych because they are Stand Alone Grad Programs. Check that there's no UG enrollment in these programs.
+     or sorcmjr_dept_code is null) --Include anything already not filtered out that has no dept code
+group by ft_pt, 'Fall '+left(term_code_Key,4), DISCIPLINE, majr_desc1)
+
+, AGRTCNT AS
+    (select
+    cast(sum (headcount) as decimal) as HC,
+    cast(sum (case when ft_pt = 'FT' then headcount END) as decimal) AS FT_HC,
+     cast(sum (case when ft_pt = 'PT' then headcount END) as decimal) AS PT_HC
+    from StuCount WITH (NOLOCK))
+
+, STCnt AS (select format(FT_HC + (PT_HC/3), '0') AS StuCnt
+    from AGRTCNT WITH (NOLOCK))
+
+
+select s.StuCnt, f.FacCnt, format(round(cast(s.StuCnt as decimal)/cast(f.FacCnt as decimal), 0), '0') as Ratio
+    From STCnt s  WITH(NOLOCK)
+        cross join FACCNT f
