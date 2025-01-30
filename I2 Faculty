@@ -1,0 +1,68 @@
+WITH DIST_FAC AS (select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and coll_code in ('lw', 'dt', 'sp', 'ph', 'hs')
+                    and (dept_code not in ('spau', 'slpa', 'hygn', 'dhyg') or dept_code is null)-- speech-language and dental hyg faculty
+                  UNION ALL
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and coll_code in ('ed', 'bc')
+                    and dept_code in ('ADLD', 'EPSY', 'EADM', 'EDUC', 'LLC', 'CSP', 'EDSP')---- graduate only education departments
+
+                  UNION ALL
+
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and fatt_code in ('SIFF', 'EXPT') -- SIF Faculty and External Partnership Faculty (off-campus edu)
+--- and id not in (select id from #stand_alone_fac)--to avoid duplicates
+
+                  UNION ALL
+
+                  select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+                  from central.dbo.fac
+                  where report = 1
+                    and year = '2023'
+                    and season = 'fall'
+                    and primary_activity in ('i')
+                    and fctg_code in ('FTFAC', 'PTFAC')
+                    and dept_code in ('CEUS', 'OLLI')--CPCE, not stand alone grad programs. These departments need to be remove. They are continuing education.
+)
+
+
+, StandAlone_Fac AS (
+select distinct PIDM_KEY, ID, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+From DIST_FAC)
+
+, FAC_LIST AS (
+select pidm_key, id, fctg_code, fctg_desc, DEPT_CODE, DEPT_DESC, COLL_CODE
+from central.dbo.fac
+where report = 1
+and year = '2023'
+and season = 'fall'
+and primary_activity in ('i')
+and fctg_code in ('FTFAC','PTFAC')
+and id not in (select id from StandAlone_Fac))
+
+, AGRCNT AS
+    (select
+    cast(count (id) as decimal) as HC,
+    cast(count (case when fctg_code like 'FT%' then id END) as decimal) AS FT_HC,
+     cast(count (case when fctg_code like 'PT%' then id END) as decimal) AS PT_HC
+    from FAC_LIST WITH (NOLOCK))
+
+select format(FT_HC + (PT_HC/3), '0') AS FacCnt
+    from AGRCNT WITH (NOLOCK)
